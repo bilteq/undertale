@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>Undertale Walka</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: black;
+      width: 100%;
+      height: 100%;
+    }
+    canvas {
+      display: block;
+      margin: 0 auto;
+      background-color: black;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="battle-canvas"></canvas>
+  <audio id="battle-music" src="battle-theme.mp3" loop></audio>
+  <audio id="attack-sound" src="attack-sound.mp3"></audio>
+  <script>
+    const canvas = document.getElementById("battle-canvas");
+    const ctx = canvas.getContext("2d");
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const enemyImage = new Image();
+    enemyImage.src = "gaster.jpeg";
+
+    const alternateEnemyImage = new Image();
+    alternateEnemyImage.src = "gaster-alt.png";
+
+    const player = { hp: 20, maxHp: 20 };
+    const soul = { x: canvas.width / 2 - 10, y: canvas.height / 2, size: 20, speed: 6 };
+    const enemy = { name: "Toffi", hp: 100, maxHp: 100 };
+
+    let gameState = "menu";
+    const menuOptions = ["WALCZ", "ACT", "ITEM", "MERCY"];
+    let selectedOption = 0;
+    const bullets = [];
+    let attackPattern = 0;
+    let dialogue = "";
+    let shake = 0;
+    let damageFlash = 0;
+    let damageText = "";  // Zmienna do wyświetlania obrażeń
+
+    const keysPressed = { ArrowLeft: false, ArrowRight: false, ArrowUp: false, ArrowDown: false };
+
+    const battleMusic = document.getElementById("battle-music");
+    const attackSound = document.getElementById("attack-sound");
+
+    const arena = {
+      x: canvas.width / 2 - 150,
+      y: canvas.height / 2 - 90,
+      width: 300,
+      height: 180
+    };
+
+    let attackBar = { x: 0, speed: 8, width: 300, height: 30 };
+    let isBarActive = false;
+    let isImageChanged = false;
+    let imageChangeDuration = 0; 
+    
+    function drawAttackBar() {
+      const barX = canvas.width / 2 - attackBar.width / 2;
+      const barY = canvas.height / 2 + 160; // Zwiększamy wartość, aby pasek był niżej
+
+      ctx.fillStyle = "gray";
+      ctx.fillRect(barX, barY, attackBar.width, attackBar.height);
+
+      ctx.fillStyle = "yellow";
+      ctx.fillRect(barX + attackBar.width / 2 - 2, barY - 10, 4, attackBar.height + 20);
+
+      ctx.fillStyle = "white";
+      ctx.fillRect(barX + attackBar.x, barY, 10, attackBar.height);
+
+      attackBar.x += attackBar.speed;
+      if (attackBar.x < 0 || attackBar.x > attackBar.width - 10) {
+        attackBar.speed *= -1;
+      }
+    }
+
+    function calculateDamage() {
+      const middle = attackBar.width / 2;
+      const distance = Math.abs((attackBar.x + 5) - middle);
+      const maxDamage = 20;
+      const damage = Math.max(1, Math.round(maxDamage * (1 - distance / middle)));
+
+      if (damage > 0) {
+        isImageChanged = true;
+        imageChangeDuration = 20;
+      }
+
+      // Ustawienie tekstu obrażeń
+      damageText = `Zadajesz ${damage} obrażeń!`;
+      return damage;
+    }
+
+    function drawHeart(x, y, size, color = "red") {
+      ctx.save();
+      ctx.translate(x + size / 2, y + size / 2);
+      ctx.scale(size / 10, size / 10);
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(0, -3);
+      ctx.bezierCurveTo(2, -5, 5, -3, 5, 0);
+      ctx.bezierCurveTo(5, 3, 0, 5, 0, 7);
+      ctx.bezierCurveTo(0, 5, -5, 3, -5, 0);
+      ctx.bezierCurveTo(-5, -3, -2, -5, 0, -3);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function createBullet(pattern) {
+      const size = 12;
+      let bullet = {};
+      switch (pattern) {
+        case 0:
+          bullet = {
+            x: arena.x + Math.random() * arena.width,
+            y: arena.y,
+            vx: 0,
+            vy: 3 + Math.random() * 2,
+            size
+          };
+          break;
+        case 1:
+          bullet = {
+            x: arena.x,
+            y: arena.y + Math.random() * arena.height,
+            vx: 3 + Math.random() * 2,
+            vy: 0,
+            size
+          };
+          break;
+        case 2:
+          const dir = Math.random() < 0.5 ? -1 : 1;
+          bullet = {
+            x: arena.x + Math.random() * arena.width,
+            y: arena.y,
+            vx: 2 * dir,
+            vy: 2 + Math.random() * 2,
+            zigzag: true,
+            angle: 0,
+            size
+          };
+          break;
+      }
+      bullets.push(bullet);
+    }
+
+    function updateBullets() {
+      bullets.forEach(b => {
+        if (b.zigzag) {
+          b.angle += 0.2;
+          b.x += Math.sin(b.angle) * 4;
+          b.y += b.vy;
+        } else {
+          b.x += b.vx;
+          b.y += b.vy;
+        }
+
+        if (
+          b.x < soul.x + soul.size &&
+          b.x + b.size > soul.x &&
+          b.y < soul.y + soul.size &&
+          b.y + b.size > soul.y
+        ) {
+          if (damageFlash === 0) {
+            player.hp -= 1;
+            damageFlash = 10;
+            shake = 6;
+            if (player.hp <= 0) gameState = "end";
+          }
+        }
+      });
+    }
+
+    function drawBullets() {
+      ctx.fillStyle = "white";
+      bullets.forEach(b => ctx.fillRect(b.x, b.y, b.size, b.size));
+    }
+
+    function drawArena() {
+      ctx.strokeStyle = "white";
+      ctx.strokeRect(arena.x, arena.y, arena.width, arena.height);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(arena.x, arena.y, arena.width, arena.height);
+      ctx.clip();
+      if (damageFlash > 0) {
+        ctx.fillStyle = "rgba(255,0,0,0.3)";
+        ctx.fillRect(arena.x, arena.y, arena.width, arena.height);
+      }
+      drawHeart(soul.x, soul.y, soul.size);
+      drawBullets();
+      updateBullets();
+      ctx.restore();
+    }
+
+    function drawMenu() {
+      ctx.font = "bold 54px Comis Sans";
+      const buttonWidth = 220;
+      const buttonHeight = 100;
+      const spacing = 80;
+      const totalWidth = menuOptions.length * buttonWidth + (menuOptions.length - 1) * spacing;
+      const startX = canvas.width / 2 - totalWidth / 2;
+      const y = canvas.height - 140;
+
+      menuOptions.forEach((opt, i) => {
+        const x = startX + i * (buttonWidth + spacing);
+
+        ctx.strokeStyle = selectedOption === i ? "yellow" : "white";
+        ctx.lineWidth = 6;
+        ctx.strokeRect(x, y - 60, buttonWidth, buttonHeight);
+
+        ctx.fillStyle = selectedOption === i ? "yellow" : "white";
+        const textWidth = ctx.measureText(opt).width;
+        ctx.fillText(opt, x + buttonWidth / 2 - textWidth / 2, y);
+      });
+    }
+
+    function drawHP() {
+      ctx.fillStyle = "white";
+      ctx.font = "28px Comis Sans";
+      ctx.fillText(`HP: ${player.hp}/${player.maxHp}`, 30, canvas.height - 30);
+
+      const hpBarWidth = 300;
+      const hpX = canvas.width - hpBarWidth - 30;
+      const hpY = 30;
+      const width = hpBarWidth * (enemy.hp / enemy.maxHp);
+
+      ctx.fillStyle = "gray";
+      ctx.fillRect(hpX, hpY, hpBarWidth, 24);
+      ctx.fillStyle = "red";
+      ctx.fillRect(hpX, hpY, width, 24);
+    }
+
+    function drawEnemyImage() {
+      if (isImageChanged && imageChangeDuration > 0) {
+        if (alternateEnemyImage.complete) {
+          const dx = shake > 0 ? Math.random() * 10 - 5 : 0;
+          ctx.drawImage(alternateEnemyImage, canvas.width / 2 - 150 + dx, 60, 300, 300);
+        }
+        imageChangeDuration--;
+        if (imageChangeDuration === 0) {
+          isImageChanged = false;
+        }
+      } else {
+        if (enemyImage.complete) {
+          const dx = shake > 0 ? Math.random() * 10 - 5 : 0;
+          ctx.drawImage(enemyImage, canvas.width / 2 - 150 + dx, 60, 300, 300);
+        }
+      }
+    }
+
+    function drawDialogue() {
+      if (dialogue && gameState !== "end") {
+        ctx.fillStyle = "white";
+        ctx.font = "28px Comis Sans";
+        const textWidth = ctx.measureText(dialogue).width;
+        ctx.fillText(dialogue, canvas.width / 2 - textWidth / 2, arena.y + arena.height + 50);
+      }
+
+      if (damageText) {
+        ctx.fillStyle = "white";  // Kolor tekstu obrażeń
+        ctx.font = "40px Comis Sans";
+        const damageTextWidth = ctx.measureText(damageText).width;
+        ctx.fillText(damageText, canvas.width / 2 - damageTextWidth / 2, canvas.height / 2 - 50);  // Wysrodkowanie tekstu
+        setTimeout(() => damageText = "", 1000); // Po 1 sekundzie usuwamy tekst
+      }
+    }
+
+    function moveSoul() {
+      if (gameState !== "enemyTurn") return;
+      if (keysPressed.ArrowLeft && soul.x > arena.x) soul.x -= soul.speed;
+      if (keysPressed.ArrowRight && soul.x + soul.size < arena.x + arena.width) soul.x += soul.speed;
+      if (keysPressed.ArrowUp && soul.y > arena.y) soul.y -= soul.speed;
+      if (keysPressed.ArrowDown && soul.y + soul.size < arena.y + arena.height) soul.y += soul.speed;
+    }
+
+    function handleMenuSelect() {
+      const action = menuOptions[selectedOption];
+      if (action === "WALCZ") {
+        gameState = "attackBar";
+        attackBar.x = 0;
+        attackBar.speed = 8;
+        isBarActive = true;
+      } else {
+        dialogue = `${action} nic nie robi...`;
+        startEnemyTurn();
+      }
+    }
+
+    function startEnemyTurn() {
+      gameState = "enemyTurn";
+      soul.x = canvas.width / 2 - 10;
+      soul.y = canvas.height / 2;
+      bullets.length = 0;
+      attackPattern = (attackPattern + 1) % 3;
+      const interval = setInterval(() => createBullet(attackPattern), 250);
+      setTimeout(() => {
+        clearInterval(interval);
+        bullets.length = 0;
+        if (player.hp > 0) {
+          gameState = "menu";
+          dialogue = "";
+        }
+      }, 4000);
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawEnemyImage();
+      drawHP();
+      drawDialogue();
+      if (gameState === "menu") drawMenu();
+      if (gameState === "enemyTurn") drawArena();
+      if (gameState === "attackBar") drawAttackBar();
+      if (gameState === "end") {
+        ctx.fillStyle = "red";
+        ctx.font = "60px Comis Sans";
+        ctx.fillText(player.hp <= 0 ? "PRZEGRAŁEŚ!" : "KONIEC GRY", canvas.width / 2 - 200, canvas.height / 2);
+      }
+      moveSoul();
+      if (shake > 0) shake--;
+      if (damageFlash > 0) damageFlash--;
+      requestAnimationFrame(draw);
+    }
+
+    document.addEventListener("keydown", e => {
+      if (e.key in keysPressed) keysPressed[e.key] = true;
+
+      if (gameState === "menu") {
+        if (e.key === "ArrowLeft") selectedOption = (selectedOption + 3) % 4;
+        if (e.key === "ArrowRight") selectedOption = (selectedOption + 1) % 4;
+        if (e.key === "Enter") handleMenuSelect();
+      }
+
+      if (gameState === "attackBar" && e.key === " ") {
+        const damage = calculateDamage();
+        enemy.hp -= damage;
+        attackSound.play();
+        shake = 10;
+        isBarActive = false;
+        if (enemy.hp <= 0) {
+          gameState = "end";
+        } else {
+          setTimeout(() => startEnemyTurn(), 1000);
+        }
+      }
+    });
+
+    document.addEventListener("keyup", e => {
+      if (e.key in keysPressed) keysPressed[e.key] = false;
+    });
+
+    document.body.addEventListener("click", () => {
+      if (battleMusic.paused) {
+        battleMusic.play();
+      }
+    });
+
+    draw();
+  </script>
+</body>
+</html>
